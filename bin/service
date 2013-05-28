@@ -1,6 +1,6 @@
 #/bin/sh
 
-PYTHONPATH=gen-py:pycassa:pysignalfd:`find pysignalfd/build/lib.* -maxdepth 0`
+PYTHONPATH=gen-py:pysignalfd:`find pysignalfd/build/lib.* -maxdepth 0`
 CONFIG="-f etc/common.conf -f etc/service.conf"
 
 export PYTHONPATH

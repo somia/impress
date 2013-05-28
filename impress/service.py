@@ -29,7 +29,6 @@ from . import util
 from .cache import Cache
 from .config import argument_parser, configure, reconfigure, conf, log
 from .registry import Registry
-from .storage import Storage
 
 def main(args):
 	parser = argument_parser()
@@ -42,8 +41,7 @@ def main(args):
 	registry = Registry()
 	control = Control()
 
-	with Storage() as storage:
-		cache = Cache(storage)
+	cache = Cache()
 
 	addqueue = AddQueue(registry, cache)
 	service = Service(addqueue, cache)
@@ -76,8 +74,7 @@ def main(args):
 			condition = control.sleep()
 
 			if condition == control.Condition.Timeout:
-				with Storage() as storage:
-					cache.flush(storage)
+				cache.flush()
 
 			elif condition == control.Condition.Terminate:
 				break
@@ -89,13 +86,12 @@ def main(args):
 
 			elif condition == control.Condition.User1:
 				if conf.getboolean("debug", "force_cache_rotation", False):
-					with Storage() as storage:
-						cache.flush(storage, force_rotate=True)
+					cache.flush(force_rotate=True)
 	finally:
 		log.info("closing add queue")
 		addqueue.close()
 
-		cache.flush(storage)
+		cache.flush()
 
 		log.info("exit")
 

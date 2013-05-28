@@ -16,10 +16,10 @@ class Site(object):
 		return x
 
 	def __init__(self, name):
-		offset = conf.getint("site", name)
-
 		self.name = name
-		self.offset = datetime.timedelta(hours=offset)
+		config = conf.get("site", name)
+		self.dynamodb_table_name, offsetconfig = config.strip().split()
+		self.offset = datetime.timedelta(hours=int(offsetconfig))
 
 	def __str__(self):
 		return self.name

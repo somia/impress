@@ -1,6 +1,3 @@
-[submodule "pycassa"]
-	path = pycassa
-	url = git://github.com/somia/pycassa.git
 [submodule "pysignalfd"]
 	path = pysignalfd
 	url = git://github.com/somia/pysignalfd.git

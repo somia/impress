@@ -2,8 +2,8 @@
 """
 
 ERROR_OTHER = 1
-ERROR_CASSANDRA = 4
 ERROR_NETWORK = 5
+ERROR_DYNAMODB = 6
 
 class NullLogger(object):
 

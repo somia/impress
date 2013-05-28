@@ -8,13 +8,9 @@ distutils.core.setup(
 		"impress.models",
 		"impress.patterns",
 		"impress_thrift",
-		"pycassa",
-		"cassandra",
 	],
 	package_dir = {
 		"impress":        "impress",
 		"impress_thrift": "gen-py/impress_thrift",
-		"pycassa":        "pycassa/pycassa",
-		"cassandra":      "pycassa/cassandra",
 	},
 )

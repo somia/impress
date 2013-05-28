@@ -17,6 +17,7 @@ from . import util
 from .backup import BackupFile, NewBackup
 from .config import conf, log
 from .site import Site
+from .storage import Storage
 from .timeline import Slot
 
 class Day(Slot):
@@ -72,50 +73,25 @@ class Day(Slot):
 		length = len(self.cachedata)
 		errors = 0
 
-		iterator = self.cachedata.iteritems()
-
-		if progress.is_enabled():
-			prefix = "storing site %s cache %s keys: " % (site, self.key)
-			counter = progress.Counter(total=length, interval=1000, prefix=prefix)
-			iterator = counter(iterator)
-		else:
-			log.debug("storing site %s cache %s with %d keys", site, self.key, length)
-
-		for objkey, modeldata in iterator:
-			try:
-				storage.insert(site, objkey, self.key, modeldata.get())
-			except:
-				log.exception("object %s_%s slot %s insert failed", site, objkey, self.key)
-				errors += 1
-
-		if errors:
-			log.error("failed to store %d/%d keys of site %s cache %s", errors, length, site, self.key)
-		elif not progress.is_enabled():
-			log.info("stored site %s cache %s", site, self.key)
-
-		return errors == 0
-
-	def store_dynamo(self, site, storage):
-		length = len(self.cachedata)
-		errors = 0
-
-		log.debug("DynamoDB: storing site %s cache %s with %d keys", site, self.key, length)
+		log.debug("storing site %s cache %s with %d keys", site, self.key, length)
 
 		start_time = time.time()
 
 		for objkey, modeldata in self.cachedata.iteritems():
 			try:
-				storage.insert_dynamo(site, objkey, self.key, modeldata.get())
+				storage.insert(objkey, self.key, modeldata.get())
 			except:
-				log.exception("DynamoDB: object %s_%s slot %s insert failed", site, objkey, self.key)
+				log.exception("object %s_%s slot %s insert failed", site, objkey, self.key)
 				errors += 1
 
 		rate = length / (time.time() - start_time)
 
 		if errors:
-			log.error("DynamoDB: failed to store %d/%d keys of site %s cache %s (%f items per second)", errors, length, site, self.key, rate)
+			log.error("failed to store %d/%d keys of site %s cache %s (%f items per second)", errors, length, site, self.key, rate)
 		else:
-			log.info("DynamoDB: stored site %s cache %s (%f items per second)", site, self.key, rate)
+			log.info("stored site %s cache %s (%f items per second)", site, self.key, rate)
+
+		return errors == 0
 
 	backup_version = 1
 
@@ -210,9 +186,9 @@ class Active(object):
 		log.debug("loading site %s cache backup", self.site)
 
 		with util.timing() as loadtime:
-			stored = storage.get_cache_backup(self.site)
+			stored = storage.get_cache_backup()
 			if not stored:
-				log.warning("site %s cache backup not found from cassandra", self.site)
+				log.warning("site %s cache backup not found from dynamodb", self.site)
 
 			local = self.open_local_backup()
 			if local:
@@ -225,7 +201,7 @@ class Active(object):
 						del stored
 						choice = local
 					else:
-						log.warning("cache backup in cassandra is newest")
+						log.warning("cache backup in dynamodb is newest")
 						choice = stored
 				else:
 					choice = stored
@@ -256,7 +232,7 @@ class Active(object):
 
 		try:
 			with util.timing() as dumptime:
-				storage.close()
+				storage.reset()
 
 				with self.lock:
 					with util.Fork() as child:
@@ -265,7 +241,7 @@ class Active(object):
 
 							backup = self.day.make_backup()
 							try:
-								storage.insert_cache_backup(self.site, backup)
+								storage.insert_cache_backup(backup)
 								result = 0
 							except:
 								self.dump_local_backup(backup)
@@ -335,7 +311,7 @@ class History(object):
 				day.get(objkeys, callback)
 
 	def store(self, storage):
-		storage.close()
+		storage.reset()
 
 		with self.lock:
 			if not self.days:
@@ -346,15 +322,8 @@ class History(object):
 					gc.set_debug(0)
 
 					for day in self.days:
-						if not day.store(self.site, storage):
+						if not day.store(storage):
 							util.safe(self.dump_local_backup, (day,))
-
-					try:
-						if self.site.name.endswith("_dynamo") and storage.dynamo_table:
-							for day in self.days:
-								day.store_dynamo(self.site, storage)
-					except:
-						log.exception("DynamoDB store failed")
 
 			count = len(self.days)
 
@@ -389,10 +358,11 @@ class History(object):
 class SiteCache(object):
 	""" Manages active cache and cache history per Site.
 	"""
-	def __init__(self, sitename, storage):
+	def __init__(self, sitename):
 		site = Site(sitename)
+		self.storage = Storage(site)
 
-		self.active = Active(site, storage)
+		self.active = Active(site, self.storage)
 		self.history = History(site)
 
 	def add(self, objkeys, data, model):
@@ -436,7 +406,7 @@ class SiteCache(object):
 
 		return "{" + ",".join(json_slots) + "}"
 
-	def flush(self, storage, force_rotate=False):
+	def flush(self, force_rotate=False):
 		""" Rotates active cache (if necessary), stores cache history
 		    and backups active cache.
 		"""
@@ -444,14 +414,14 @@ class SiteCache(object):
 		if yesterday:
 			self.history.append(yesterday)
 
-		util.safe(self.history.store, (storage,), error="history storing failed")
-		util.safe(self.active.dump_backup, (storage,), error="backup dumping failed")
+		util.safe(self.history.store, (self.storage,), error="history storing failed")
+		util.safe(self.active.dump_backup, (self.storage,), error="backup dumping failed")
 
 class Cache(object):
 	""" Groups all known SiteCaches.
 	"""
-	def __init__(self, storage):
-		self.sitecaches = { name: SiteCache(name, storage) for name in conf.options("site") }
+	def __init__(self):
+		self.sitecaches = { name: SiteCache(name) for name in conf.options("site") }
 
 	def add(self, sitename, objkeys, data, model):
 		""" @type sitename: str
@@ -468,9 +438,9 @@ class Cache(object):
 		"""
 		return self.sitecaches[sitename].get(objkeys)
 
-	def flush(self, storage, force_rotate=False):
+	def flush(self, force_rotate=False):
 		for sitecache in self.sitecaches.itervalues():
-			sitecache.flush(storage, force_rotate)
+			sitecache.flush(force_rotate)
 
 def check_dirname(path):
 	""" Creates all directories in a filename path if they don't exist.

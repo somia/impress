@@ -18,11 +18,9 @@ def main(args):
 
 	ExportCommand(subparsers)
 	ExportJsonCommand(subparsers)
-	ExportHistoryFromCassandraCommand(subparsers)
-	ExportHistoryFromDynamoCommand(subparsers)
+	ExportHistoryCommand(subparsers)
 	ExportObjectHistoryCommand(subparsers)
-	PrintObjectHistoryFromCassandraCommand(subparsers)
-	PrintObjectHistoryFromDynamoCommand(subparsers)
+	PrintObjectHistoryCommand(subparsers)
 	ConvertToJsonCommand(subparsers)
 	RestoreCommand(subparsers)
 	RestoreHistoryCommand(subparsers)
@@ -67,7 +65,7 @@ class ForceMixin(object):
 class ExportCommand(Command):
 
 	name = "export"
-	help = "copy backup from Cassandra to stdout"
+	help = "copy backup from DynamoDB to stdout"
 	args = [
 		dict(name="sitename", action="store"),
 	]
@@ -82,7 +80,7 @@ class ExportCommand(Command):
 class ExportJsonCommand(Command, JsonMixin):
 
 	name = "export-json"
-	help = "load backup from Cassandra and print it to stdout as JSON"
+	help = "load backup from DynamoDB and print it to stdout as JSON"
 	args = [
 		dict(name="sitename", action="store"),
 	]
@@ -97,55 +95,33 @@ class ExportJsonCommand(Command, JsonMixin):
 class ExportRowMixin(object):
 
 	def export(self, row):
-		values = { row.storekey: row.slots }
+		values = { row.objkey: row.slots }
 		print pickle.dumps(values)
 		print
 
-class ExportHistoryCommandMixin(Command, ExportRowMixin):
+class ExportHistoryCommand(Command, ExportRowMixin):
+
+	name = "export-history"
+	help = "copy rows from DynamoDB to stdout as pickled"
 
 	def __call__(self, args):
 		try:
-			for row in self.rows():
+			for row in Storage().iterate_rows():
 				self.export(row)
 
 		except KeyboardInterrupt:
 			print >>sys.stderr
 			print >>sys.stderr, "Interrupted"
 
-class ExportHistoryFromCassandraMixin(object):
-
-	def rows(self):
-		return Storage().iterate_rows()
-
-class ExportHistoryFromDynamoMixin(object):
-
-	def rows(self):
-		return Storage().iterate_rows_dynamo()
-
-class ExportHistoryFromCassandraCommand(ExportHistoryCommandMixin, ExportHistoryFromCassandraMixin):
-
-	name = "export-history"
-	help = "copy rows from Cassandra to stdout as pickled"
-
-class ExportHistoryFromDynamoCommand(ExportHistoryCommandMixin, ExportHistoryFromDynamoMixin):
-
-	name = "export-history-from-dynamodb"
-	help = "copy rows from DynamoDB to stdout as pickled"
-
-class ObjectHistoryFromCassandraMixin(object):
+class ObjectHistoryMixin(object):
 
 	def get(self, args):
 		return Storage()._get(Site(args.sitename), args.objkey)
 
-class ObjectHistoryFromDynamoMixin(object):
-
-	def get(self, args):
-		return Storage()._get_dynamo(Site(args.sitename), args.objkey)
-
-class ExportObjectHistoryCommand(Command, ExportRowMixin, ObjectHistoryFromCassandraMixin):
+class ExportObjectHistoryCommand(Command, ObjectHistoryMixin, ExportRowMixin):
 
 	name = "export-object-history"
-	help = "copy row from Cassandra to stdout as pickled"
+	help = "copy row from DynamoDB to stdout as pickled"
 	args = [
 		dict(name="sitename", action="store"),
 		dict(name="objkey", action="store"),
@@ -156,7 +132,14 @@ class ExportObjectHistoryCommand(Command, ExportRowMixin, ObjectHistoryFromCassa
 		if row:
 			self.export(row)
 
-class PrintObjectHistoryCommandMixin(Command):
+class PrintObjectHistoryCommand(Command, ObjectHistoryMixin):
+
+	name = "print-object-history"
+	help = "copy row from DynamoDB to stdout in human-readable format"
+	args = [
+		dict(name="sitename", action="store"),
+		dict(name="objkey", action="store"),
+	]
 
 	def __call__(self, args):
 		row = self.get(args)
@@ -175,24 +158,6 @@ class PrintObjectHistoryCommandMixin(Command):
 
 				print
 
-class PrintObjectHistoryFromCassandraCommand(PrintObjectHistoryCommandMixin, ObjectHistoryFromCassandraMixin):
-
-	name = "print-object-history"
-	help = "copy row from Cassandra to stdout in human-readable format"
-	args = [
-		dict(name="sitename", action="store"),
-		dict(name="objkey", action="store"),
-	]
-
-class PrintObjectHistoryFromDynamoCommand(PrintObjectHistoryCommandMixin, ObjectHistoryFromDynamoMixin):
-
-	name = "print-object-history-from-dynamodb"
-	help = "copy row from DynamoDB to stdout in human-readable format"
-	args = [
-		dict(name="sitename", action="store"),
-		dict(name="objkey", action="store"),
-	]
-
 class ConvertToJsonCommand(Command, JsonMixin):
 
 	name = "convert-to-json"
@@ -207,7 +172,7 @@ class ConvertToJsonCommand(Command, JsonMixin):
 class RestoreCommand(Command, ForceMixin):
 
 	name = "restore"
-	help = "load backup from FILE and store it to Cassandra"
+	help = "load backup from FILE and store it to DynamoDB"
 	args = [
 		ForceMixin.force_arg,
 		dict(name="filename", action="store"),
@@ -230,7 +195,7 @@ class RestoreCommand(Command, ForceMixin):
 class RestoreHistoryCommand(Command, ForceMixin):
 
 	name = "restore-history"
-	help = "read pickled rows from FILE and store them to Cassandra"
+	help = "read pickled rows from FILE and store them to DynamoDB"
 	args = [
 		ForceMixin.force_arg,
 		dict(name="filename", action="store"),
@@ -246,8 +211,7 @@ class RestoreHistoryCommand(Command, ForceMixin):
 			try:
 				while True:
 					for storekey, slots in pickle.load(file).iteritems():
-						storage._remove(storekey)
-						storage._insert(storekey, slots)
+						storage._replace(storekey, slots)
 						counter.increment()
 
 					file.read(2)
@@ -259,7 +223,7 @@ class RestoreHistoryCommand(Command, ForceMixin):
 class ResetCommand(Command, ForceMixin):
 
 	name = "reset"
-	help = "clear the cache backup in Cassandra"
+	help = "clear the cache backup in DynamoDB"
 	args = [
 		ForceMixin.force_arg,
 		dict(name="sitename", action="store"),

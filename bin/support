@@ -1,7 +1,3 @@
 #/bin/sh
-
-PYTHONPATH=pycassa
 CONFIG="-f etc/common.conf -f etc/support.conf"
-
-export PYTHONPATH
 exec ${PYTHON:-python} -m impress.support $CONFIG "$@"

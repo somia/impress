@@ -1,7 +1,3 @@
 #/bin/sh
-
-PYTHONPATH=pycassa
 CONFIG="-f etc/common.conf -f etc/tool.conf"
-
-export PYTHONPATH
 exec ${PYTHON:-python} -m impress.tool $CONFIG "$@"
