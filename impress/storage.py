@@ -9,7 +9,7 @@ import time
 import cassandra.ttypes as cassandratypes
 import pycassa
 
-import boto
+import boto.dynamodb
 
 from . import json
 from .backup import BackupData
@@ -72,13 +72,14 @@ class Storage(object):
 		self._family = None
 
 		try:
-			self.dynamo_table = boto.connect_dynamodb(
-				aws_access_key_id     = conf.get("dynamodb", "aws_access_key_id"),
-				aws_secret_access_key = conf.get("dynamodb", "aws_secret_access_key"),
-				host                  = conf.get("dynamodb", "host"),
-			).get_table(
-				name                  = conf.get("dynamodb", "table"),
-			)
+			params = {}
+			for key in ["aws_access_key_id", "aws_secret_access_key"]:
+				value = conf.get("dynamodb", key, None)
+				if value is not None:
+					params[key] = value
+
+			conn = boto.dynamodb.connect_to_region(conf.get("dynamodb", "region"), **params)
+			self.dynamo_table = conn.get_table(name=conf.get("dynamodb", "table"))
 		except:
 			log.exception("DynamoDB init failed")
 			self.dynamo_table = None
