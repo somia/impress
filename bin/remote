@@ -1,0 +1,15 @@
+#/bin/bash
+
+if [ $# -lt 2 ]
+then
+	echo >&2 "Usage: $0 HOST METHOD [ARGS]"
+	exit 1
+fi
+
+HOST=$1
+shift
+
+PYTHONPATH=gen-py
+
+export PYTHONPATH
+exec ${PYTHON:-python} gen-py/impress_thrift/ImpressCache-remote -h $HOST:9098 "$@"
