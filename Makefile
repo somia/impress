@@ -9,7 +9,7 @@ SYSCONFDIR	:= /etc
 BINDIR		:= $(PREFIX)/bin
 CONFDIR		:= $(SYSCONFDIR)/impress$(VERSION)
 
-default: build-thrift
+default: build
 
 thrift-api:: gen-py/impress_thrift/Impress.py
 
@@ -22,7 +22,13 @@ run-thrift-daily:: thrift-api
 run-thrift-hourly:: thrift-api
 	bin/service-thrift -f etc/hourly.conf
 
-build-thrift:: thrift-api
+run-zeromq-daily::
+	bin/service-zeromq -f etc/daily.conf
+
+run-zeromq-hourly::
+	bin/service-zeromq -f etc/hourly.conf
+
+build:: thrift-api
 	$(PYTHON) setup.py build
 	git describe --tags --always --long > build/version
 
@@ -32,7 +38,7 @@ check::
 install-lib::
 	$(PYTHON) setup.py install --root=/$(DESTDIR) --prefix=$(PREFIX)
 
-install-bin: impress-service-thrift impress-support impress-tool
+install-bin: impress-service-thrift impress-service-zeromq impress-support impress-tool
 
 impress-%:: bin/%
 	install -d $(DESTDIR)$(BINDIR)
@@ -42,6 +48,6 @@ impress-%:: bin/%
 	chmod 755 $(DESTDIR)$(BINDIR)/$@
 
 clean::
-	rm -f impress/*.py[co] impress/models/*.py[co] impress/patterns/*.py[co] impress/services/*.py[co]
+	rm -f impress/*.py[co] impress/*/*.py[co]
 	rm -rf gen-py
 	rm -rf build

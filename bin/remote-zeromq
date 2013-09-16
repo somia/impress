@@ -1,0 +1,25 @@
+#!/usr/bin/env python
+
+import sys
+
+import zmq
+
+def main():
+	host, method, site, objkeys, data = sys.argv[1:]
+	assert method == "add"
+
+	context = zmq.Context()
+
+	try:
+		socket = context.socket(zmq.PUB)
+		socket.connect("tcp://{}:9198".format(host))
+
+		try:
+			socket.send(b"{} {} {}".format(site, objkeys, data))
+		finally:
+			socket.close()
+	finally:
+		context.term()
+
+if __name__ == "__main__":
+	main()

@@ -1,0 +1,5 @@
+#/bin/sh
+
+CONFIG="-f etc/common.conf -f etc/service.conf -f etc/zeromq.conf"
+
+exec ${PYTHON:-python} -m impress.services.zeromq $CONFIG "$@"
