@@ -227,12 +227,11 @@ class Control(object):
 			if not rlist:
 				return self.Condition.Timeout
 
-			data = os.read(self.fd, 1)
-			if not data:
+			num = signalfd.read()
+			if num is None:
 				log.warning("EOF from signal fd")
 				return self.Condition.Terminate
 
-			num = ord(data[0])
 			if num == signal.SIGTERM:
 				log.debug("SIGTERM received")
 				return self.Condition.Terminate
