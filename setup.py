@@ -7,6 +7,7 @@ distutils.core.setup(
 		"impress",
 		"impress.models",
 		"impress.patterns",
+		"impress.services",
 		"impress_thrift",
 	],
 	package_dir = {

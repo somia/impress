@@ -1,0 +1,7 @@
+#/bin/sh
+
+PYTHONPATH=gen-py:pysignalfd:`find pysignalfd/build/lib.* -maxdepth 0`
+CONFIG="-f etc/common.conf -f etc/service.conf -f etc/thrift.conf"
+
+export PYTHONPATH
+exec ${PYTHON:-python} -m impress.services.thrift $CONFIG "$@"

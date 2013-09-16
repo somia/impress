@@ -25,7 +25,7 @@ class NullLogger(object):
 	def store_local_backup(self, site, error, path):
 		pass
 
-	def thrift_error(self, error):
+	def service_error(self, error):
 		pass
 
 logger = NullLogger()
