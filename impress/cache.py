@@ -8,7 +8,6 @@ import datetime
 import gc
 import os
 import sys
-import threading
 import time
 
 from . import eventlog
@@ -137,10 +136,10 @@ class Slot(object):
 class Active(object):
 	""" Maintains the current cache.
 	"""
-	def __init__(self, site, storage):
+	def __init__(self, lock_type, site, storage):
 		self.site = site
 		self.local_backup_name = check_dirname(conf.get("backup", "local_cache_format").format(site=site))
-		self.lock = threading.Lock()
+		self.lock = lock_type()
 		self.slot = self.load_backup(storage)
 		self.modified = False
 
@@ -306,10 +305,10 @@ class Active(object):
 class History(object):
 	""" Holds previously active slots until they are stored to Storage.
 	"""
-	def __init__(self, site):
+	def __init__(self, lock_type, site):
 		self.site = site
 		self.local_backup_format = check_dirname(conf.get("backup", "local_history_format"))
-		self.lock = threading.Lock()
+		self.lock = lock_type()
 		self.slots = []
 
 	def append(self, slot):
@@ -372,12 +371,12 @@ class History(object):
 class SiteCache(object):
 	""" Manages active cache and cache history per Site.
 	"""
-	def __init__(self, sitename):
+	def __init__(self, lock_type, sitename):
 		site = Site(sitename)
 		self.storage = Storage(site)
 
-		self.active = Active(site, self.storage)
-		self.history = History(site)
+		self.active = Active(lock_type, site, self.storage)
+		self.history = History(lock_type, site)
 
 	def add(self, objkeys, data, model):
 		""" Accumulate objects's data in active cache.  The active
@@ -434,8 +433,8 @@ class SiteCache(object):
 class Cache(object):
 	""" Groups all known SiteCaches.
 	"""
-	def __init__(self):
-		self.sitecaches = { name: SiteCache(name) for name in conf.options("site") }
+	def __init__(self, lock_type):
+		self.sitecaches = { name: SiteCache(lock_type, name) for name in conf.options("site") }
 
 	def add(self, sitename, objkeys, data, model):
 		""" @type sitename: str

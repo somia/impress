@@ -7,9 +7,9 @@ from .registry import Registry
 
 class Service(object):
 
-	def __init__(self):
+	def __init__(self, lock_type):
 		self.registry = Registry()
-		self.cache = Cache()
+		self.cache = Cache(lock_type)
 
 	def __enter__(self):
 		return self
@@ -64,13 +64,13 @@ class Service(object):
 
 class Main(object):
 
-	def __init__(self, args):
+	def __init__(self, args, lock_type):
 		parser = argument_parser()
 		parser.parse_args(args)
 
 		configure("service")
 
-		self.service = Service()
+		self.service = Service(lock_type)
 
 	def __enter__(self):
 		return self.service.__enter__()

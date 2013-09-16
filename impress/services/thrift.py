@@ -30,7 +30,7 @@ from ..config import reconfigure, conf, log
 from ..service import Main
 
 def main(args):
-	with Main(args) as service:
+	with Main(args, threading.Lock) as service:
 		control = Control()
 
 		addqueue = AddQueue(service)
