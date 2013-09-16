@@ -17,7 +17,6 @@ from .site import Site
 INTERNAL_OBJKEY_PREFIX = "_"
 CACHE_BACKUP_OBJKEY    = INTERNAL_OBJKEY_PREFIX + "cache"
 CACHE_BACKUP_SLOTKEY   = "backup"
-CACHE_BACKUP_COLUMN    = "pickled"
 
 class Storage(object):
 	""" DynamoDB abstraction.
@@ -150,7 +149,8 @@ class Storage(object):
 		evlog_error = eventlog.ERROR_DYNAMODB
 		try:
 			item = self.table.new_item(CACHE_BACKUP_OBJKEY, CACHE_BACKUP_SLOTKEY)
-			item[CACHE_BACKUP_COLUMN] = data
+			item["data"] = data
+			item["time"] = time.time()
 			item.put()
 
 			evlog_error = 0
@@ -166,7 +166,7 @@ class Storage(object):
 				range_key       = CACHE_BACKUP_SLOTKEY,
 				consistent_read = False,
 			)
-			return BackupData(item[CACHE_BACKUP_COLUMN])
+			return BackupData(item["data"], item["time"])
 		except boto.dynamodb.exceptions.DynamoDBKeyNotFoundError:
 			return None
 
