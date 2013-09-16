@@ -71,7 +71,7 @@ class ExportCommand(Command):
 	]
 
 	def __call__(self, args):
-		backup = Storage().get_cache_backup(Site(args.sitename))
+		backup = Storage(Site(args.sitename)).get_cache_backup()
 		if backup:
 			NewBackup(backup.load()).dump(sys.stdout)
 		else:
@@ -86,7 +86,7 @@ class ExportJsonCommand(Command, JsonMixin):
 	]
 
 	def __call__(self, args):
-		backup = Storage().get_cache_backup(Site(args.sitename))
+		backup = Storage(Site(args.sitename)).get_cache_backup()
 		if backup:
 			self.dump_backup_as_json(backup)
 		else:
@@ -103,10 +103,13 @@ class ExportHistoryCommand(Command, ExportRowMixin):
 
 	name = "export-history"
 	help = "copy rows from DynamoDB to stdout as pickled"
+	args = [
+		dict(name="sitename", action="store"),
+	]
 
 	def __call__(self, args):
 		try:
-			for row in Storage().iterate_rows():
+			for row in Storage(Site(args.sitename)).iterate_rows():
 				self.export(row)
 
 		except KeyboardInterrupt:
@@ -116,7 +119,7 @@ class ExportHistoryCommand(Command, ExportRowMixin):
 class ObjectHistoryMixin(object):
 
 	def get(self, args):
-		return Storage()._get(Site(args.sitename), args.objkey)
+		return Storage(Site(args.sitename))._get(args.objkey)
 
 class ExportObjectHistoryCommand(Command, ObjectHistoryMixin, ExportRowMixin):
 
@@ -181,7 +184,7 @@ class RestoreCommand(Command, ForceMixin):
 
 	def __call__(self, args):
 		site = Site(args.sitename)
-		storage = Storage()
+		storage = Storage(site)
 		slot = Slot.load_backup(BackupFile(args.filename))
 
 		self.check_force(args)
@@ -198,11 +201,12 @@ class RestoreHistoryCommand(Command, ForceMixin):
 	help = "read pickled rows from FILE and store them to DynamoDB"
 	args = [
 		ForceMixin.force_arg,
+		dict(name="sitename", action="store"),
 		dict(name="filename", action="store"),
 	]
 
 	def __call__(self, args):
-		storage = Storage()
+		storage = Storage(Site(args.sitename))
 		counter = progress.Counter(interval=100)
 
 		self.check_force(args)
@@ -231,7 +235,7 @@ class ResetCommand(Command, ForceMixin):
 
 	def __call__(self, args):
 		site = Site(args.sitename)
-		storage = Storage()
+		storage = Storage(site)
 		empty = Slot(site.current_datetime()).make_backup()
 
 		self.check_force(args)
