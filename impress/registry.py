@@ -70,3 +70,20 @@ class Registry(object):
 		"""
 		tokens = objkey.split("_", 1)
 		return tokens[0]
+
+class IntervalProxy(object):
+	__class = None
+
+	def __get_class(self):
+		if self.__class is None:
+			module = importlib.import_module(conf.get("interval", "module"))
+			self.__class = module.Interval
+		return self.__class
+
+	def __call__(self, *args, **kwargs):
+		return self.__get_class()(*args, **kwargs)
+
+	def __getattr__(self, name):
+		return getattr(self.__get_class())
+
+interval_type = IntervalProxy()

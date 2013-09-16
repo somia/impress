@@ -7,7 +7,7 @@ import sys
 
 from . import progress
 from .backup import BackupFile, NewBackup
-from .cache import Day
+from .cache import Slot
 from .config import argument_parser, configure, conf, log
 from .site import Site
 from .storage import Storage
@@ -48,8 +48,8 @@ class Command(object):
 class JsonMixin(object):
 
 	def dump_backup_as_json(self, backup):
-		day = Day.load_backup(backup)
-		values = { day.key: { objkey: modeldata.get() for objkey, modeldata in day.cachedata.iteritems() } }
+		slot = Slot.load_backup(backup)
+		values = { slot.key: { objkey: modeldata.get() for objkey, modeldata in slot.cachedata.iteritems() } }
 		json.dump(values, sys.stdout, indent=True)
 		print
 
@@ -182,14 +182,14 @@ class RestoreCommand(Command, ForceMixin):
 	def __call__(self, args):
 		site = Site(args.sitename)
 		storage = Storage()
-		day = Day.load_backup(BackupFile(args.filename))
+		slot = Slot.load_backup(BackupFile(args.filename))
 
 		self.check_force(args)
 
-		if day.is_active(site.current_date()):
-			storage.insert_cache_backup(site, day.make_backup())
+		if slot.is_active(site.current_datetime()):
+			storage.insert_cache_backup(site, slot.make_backup())
 		else:
-			if not day.store(storage):
+			if not slot.store(storage):
 				sys.exit(1)
 
 class RestoreHistoryCommand(Command, ForceMixin):
@@ -232,7 +232,7 @@ class ResetCommand(Command, ForceMixin):
 	def __call__(self, args):
 		site = Site(args.sitename)
 		storage = Storage()
-		empty = Day(site.current_date()).make_backup()
+		empty = Slot(site.current_datetime()).make_backup()
 
 		self.check_force(args)
 

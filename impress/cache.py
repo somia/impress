@@ -4,6 +4,7 @@
 from __future__ import absolute_import
 
 import copy
+import datetime
 import gc
 import os
 import sys
@@ -16,38 +17,45 @@ from . import progress
 from . import util
 from .backup import BackupFile, NewBackup
 from .config import conf, log
+from .registry import interval_type
 from .site import Site
 from .storage import Storage
-from .timeline import Slot
 
-class Day(Slot):
-	""" The objects' data of a given day.  The accumulation logic and
+class Slot(object):
+	""" The objects' data of a given interval.  The accumulation logic and
 	    internal representation is specified per object with a custom model
 	    module.
 	"""
-	def __init__(self, date, cachedata=None):
-		Slot.__init__(self, date)
+	def __init__(self, interval, cachedata=None):
+		self.interval = interval
 		self.cachedata = cachedata or {}
+
+	def __str__(self):
+		return self.key
 
 	def __nonzero__(self):
 		return bool(self.cachedata)
 
+	@property
+	def key(self):
+		return self.interval.key
+
 	def clone(self):
-		return Day(self.date, copy.deepcopy(self.cachedata))
+		return type(self)(self.interval, copy.deepcopy(self.cachedata))
 
-	def is_active(self, current_date):
-		""" Compares the day against the given date (presumably today).
+	def is_active(self, now):
+		""" Compares the interval against the given time.
 
-		    @type  current_date: datetime.date
-		    @rtype               bool
+		    @type  now: datetime.datetime
+		    @rtype      bool
 		"""
-		return current_date <= self.date
+		return now >= self.interval.start and now < self.interval.end
 
-	def add(self, objkeys, params, model, time):
+	def add(self, objkeys, params, model, now):
 		""" @type objkeys:  list(str)
 		    @type params:   list | dict
 		    @type model:    module
-		    @type time:     datetime.time
+		    @type now:      datetime.datetime
 		"""
 		for objkey in objkeys:
 			modeldata = self.cachedata.get(objkey)
@@ -58,7 +66,7 @@ class Day(Slot):
 			else:
 				assert isinstance(modeldata, model.CacheModel)
 
-			modeldata.add(params, time)
+			modeldata.add(params, now - self.interval.start)
 
 	def get(self, objkeys, callback):
 		""" @type objkeys:  list(str)
@@ -81,7 +89,7 @@ class Day(Slot):
 			try:
 				storage.insert(objkey, self.key, modeldata.get())
 			except:
-				log.exception("object %s_%s slot %s insert failed", site, objkey, self.key)
+				log.exception("site %s object %s slot %s insert failed", site, objkey, self.key)
 				errors += 1
 
 		rate = length / (time.time() - start_time)
@@ -93,94 +101,100 @@ class Day(Slot):
 
 		return errors == 0
 
-	backup_version = 1
+	backup_version = 2
+	supported_backup_versions = 1, 2
 
 	@classmethod
 	def load_backup(cls, backup):
 		values = backup.load()
 
 		version = values["version"]
-		if version != cls.backup_version:
+		if version not in cls.supported_backup_versions:
 			raise Exception("unsupported cache backup version: " + version)
 
-		date = values["date"]
+		if "interval_start" not in values:
+			date = values["date"]
+			interval_start = datetime.datetime(date.year, date.month, date.day)
+		else:
+			interval_start = values["interval_start"]
+
 		cachedata = values["cachedata"]
 
 		for modeldata in cachedata.itervalues():
 			modeldata.upgrade()
 
-		return cls(date, cachedata)
+		return cls(interval_type(interval_start), cachedata)
 
 	def make_backup(self):
 		values = {
 			"version": self.backup_version,
-			"date": self.date,
+			"interval_start": self.interval.start,
 			"cachedata": self.cachedata,
 		}
 
 		return NewBackup(values)
 
 class Active(object):
-	""" Maintains the daily cache.
+	""" Maintains the current cache.
 	"""
 	def __init__(self, site, storage):
 		self.site = site
 		self.local_backup_name = check_dirname(conf.get("backup", "local_cache_format").format(site=site))
 		self.lock = threading.Lock()
-		self.day = self.load_backup(storage)
+		self.slot = self.load_backup(storage)
 		self.modified = False
 
 	def add(self, objkeys, params, model):
-		""" Accumulate objects' data.  Return the previous day's data
-		    if the date has changed.
+		""" Accumulate objects' data.  Return the previous slot if the interval
+		    has changed.
 
 		    @type  objkeys: list(str)
 		    @type  data:    str
 		    @type  model:   module
-		    @rtype          Day | NoneType
+		    @rtype          Slot | NoneType
 		"""
 		with self.lock:
 			now = self.site.current_datetime()
 
-			yesterday = self.__rotate(now.date())
+			rotated_slot = self.__rotate(now)
 
-			self.day.add(objkeys, params, model, now.time())
+			self.slot.add(objkeys, params, model, now)
 			self.modified = True
 
-		return yesterday
+		return rotated_slot
 
 	def get(self, objkeys, callback):
 		""" @type objkeys:  list(str)
 		    @type callback: callable(slotkey:str, objkey:str, values:dict)
 		"""
 		with self.lock:
-			self.day.get(objkeys, callback)
+			self.slot.get(objkeys, callback)
 
 	def rotate(self, force=False):
-		""" Return the previous day's data if the date has changed.
+		""" Return the previous slot if the interval has changed.
 
-		    @rtype Day | NoneType
+		    @rtype Slot | NoneType
 		"""
 		with self.lock:
-			return self.__rotate(self.site.current_date(), force)
+			return self.__rotate(self.site.current_datetime(), force)
 
-	def __rotate(self, date, force=False):
-		active    = self.day.is_active(date)
-		yesterday = None
+	def __rotate(self, now, force=False):
+		active = self.slot.is_active(now)
+		rotated_slot = None
 
 		if not active or force:
-			yesterday = self.day
+			rotated_slot = self.slot
 
 			if active:
-				log.debug("cloning active site %s cache %s", self.site, yesterday)
-				self.day = self.day.clone()
+				log.debug("cloning active site %s cache %s", self.site, rotated_slot)
+				self.slot = self.slot.clone()
 			else:
-				self.day = Day(date)
+				self.slot = Slot(interval_type(now))
 				self.modified = True
 
-			log.debug("rotating site %s cache %s", self.site, yesterday)
+			log.debug("rotating site %s cache %s", self.site, rotated_slot)
 
-		return yesterday
+		return rotated_slot
 
 	def load_backup(self, storage):
 		log.debug("loading site %s cache backup", self.site)
@@ -212,13 +226,13 @@ class Active(object):
 					choice = None
 
 			if not choice:
-				return Day(self.site.current_date())
+				return Slot(interval_type(self.site.current_datetime()))
 
-			day = Day.load_backup(choice)
+			slot = Slot.load_backup(choice)
 
 		log.info("site %s cache backup load time %d s", self.site, int(loadtime))
 
-		return day
+		return slot
 
 	def dump_backup(self, storage):
 		with self.lock:
@@ -239,7 +253,7 @@ class Active(object):
 						if child:
 							gc.disable()
 
-							backup = self.day.make_backup()
+							backup = self.slot.make_backup()
 							try:
 								storage.insert_cache_backup(backup)
 								result = 0
@@ -290,52 +304,52 @@ class Active(object):
 			eventlog.logger.cache_backup(self.site.name, evlog_error, 0, True)
 
 class History(object):
-	""" Holds previously active days until they are stored to Storage.
+	""" Holds previously active slots until they are stored to Storage.
 	"""
 	def __init__(self, site):
 		self.site = site
 		self.local_backup_format = check_dirname(conf.get("backup", "local_history_format"))
 		self.lock = threading.Lock()
-		self.days = []
+		self.slots = []
 
-	def append(self, day):
+	def append(self, slot):
 		with self.lock:
-			self.days.append(day)
+			self.slots.append(slot)
 
 	def get(self, objkeys, callback):
 		""" @type objkeys:  list(str)
 		    @type callback: callable(slotkey:str, objkey:str, values:dict)
 		"""
 		with self.lock:
-			for day in self.days:
-				day.get(objkeys, callback)
+			for slot in self.slots:
+				slot.get(objkeys, callback)
 
 	def store(self, storage):
 		storage.reset()
 
 		with self.lock:
-			if not self.days:
+			if not self.slots:
 				return
 
 			with util.Fork() as child:
 				if child:
 					gc.set_debug(0)
 
-					for day in self.days:
-						if not day.store(storage):
-							util.safe(self.dump_local_backup, (day,))
+					for slot in self.slots:
+						if not slot.store(storage):
+							util.safe(self.dump_local_backup, (slot,))
 
-			count = len(self.days)
+			count = len(self.slots)
 
 		child.join()
 
 		with self.lock:
-			del self.days[:count]
+			del self.slots[:count]
 
-	def dump_local_backup(self, day):
-		backup = day.make_backup()
+	def dump_local_backup(self, slot):
+		backup = slot.make_backup()
 
-		filename = self.local_backup_format.format(site=self.site, slot=day)
+		filename = self.local_backup_format.format(site=self.site, slot=slot)
 		partname = filename + ".partial"
 
 		evlog_error = eventlog.ERROR_OTHER
@@ -375,9 +389,9 @@ class SiteCache(object):
 		"""
 		params = json.loads(data)
 
-		yesterday = self.active.add(objkeys, params, model)
-		if yesterday:
-			self.history.append(yesterday)
+		rotated_slot = self.active.add(objkeys, params, model)
+		if rotated_slot:
+			self.history.append(rotated_slot)
 
 	def get(self, objkeys):
 		""" Get objects' data from active cache and cache history.
@@ -410,9 +424,9 @@ class SiteCache(object):
 		""" Rotates active cache (if necessary), stores cache history
 		    and backups active cache.
 		"""
-		yesterday = self.active.rotate(force_rotate)
-		if yesterday:
-			self.history.append(yesterday)
+		rotated_slot = self.active.rotate(force_rotate)
+		if rotated_slot:
+			self.history.append(rotated_slot)
 
 		util.safe(self.history.store, (self.storage,), error="history storing failed")
 		util.safe(self.active.dump_backup, (self.storage,), error="backup dumping failed")

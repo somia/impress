@@ -166,7 +166,7 @@ class Storage(object):
 				range_key       = CACHE_BACKUP_SLOTKEY,
 				consistent_read = False,
 			)
-			return BackupData(item["data"], item["time"])
+			return BackupData(item["data"].encode("ascii"), item["time"])
 		except boto.dynamodb.exceptions.DynamoDBKeyNotFoundError:
 			return None
 

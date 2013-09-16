@@ -1,124 +1,54 @@
 from __future__ import absolute_import
 
 from bisect import bisect_left
-import datetime
 import json
 import sys
 
 from .config import log
+from .registry import interval_type
 
-class Slot(object):
+class ModelSlot(object):
 
-	def __init__(self, date, delta=datetime.timedelta(1)):
-		""" @type date:  datetime.date
-		    @type delta: datetime.timedelta
+	def __init__(self, interval, model, items=None):
+		""" @type interval: Interval
+		    @type model:    module
+		    @type items:    dict | None
 		"""
-		self.date = date
-		self.delta = delta
-		self.key = self.make_key(date, delta)
-
-	def __str__(self):
-		return self.key
-
-	@staticmethod
-	def make_key(date, delta):
-		""" @type  date:  datetime.date
-		    @type  delta: datetime.timedelta
-		    @rtype        str
-		"""
-		return "%s_%d" % (date.strftime("%Y%m%d"), delta.days)
-
-	@staticmethod
-	def parse_key(key):
-		""" @type  key: str
-		    @rtype      datetime.date, datetime.timedelta
-		"""
-		datestr, deltastr = key.split("_", 1)
-
-		year  = int(datestr[0:4])
-		month = int(datestr[4:6])
-		day   = int(datestr[6:8])
-		date = datetime.date(year, month, day)
-
-		days = int(deltastr)
-		delta = datetime.timedelta(days)
-
-		return date, delta
-
-class ModelSlot(Slot):
-
-	def __init__(self, date, delta, model, items=None):
-		""" @type date:  datetime.date
-		    @type delta: datetime.timedelta
-		    @type model: module
-		    @type items: dict | None
-		"""
-		Slot.__init__(self, date, delta)
-
+		self.interval = interval
 		self.modeldata = model.TimelineModel(items)
 
+	def __str__(self):
+		return str(self.interval)
+
 	def __eq__(self, other):
-		return self.date == other.date and self.delta == other.delta
+		return self.interval == other.interval
+
+	def __ne__(self, other):
+		return self.interval != other.interval
 
 	def __lt__(self, other):
-		if self.date < other.date:
-			return True
-
-		if self.date > other.date:
-			return False
-
-		return self.delta > other.delta
+		return self.interval < other.interval
 
 	def __gt__(self, other):
-		if self.date > other.date:
-			return True
-
-		if self.date < other.date:
-			return False
-
-		return self.delta < other.delta
+		return self.interval > other.interval
 
 	def __le__(self, other):
-		if self.date < other.date:
-			return True
-
-		if self.date > other.date:
-			return False
-
-		return self.delta >= other.delta
+		return self.interval <= other.interval
 
 	def __ge__(self, other):
-		if self.date > other.date:
-			return True
+		return self.interval >= other.interval
 
-		if self.date < other.date:
-			return False
-
-		return self.delta <= other.delta
-
-	def start(self):
-		""" @rtype datetime.date
-		"""
-		return self.date
-
-	def end(self):
-		""" @rtype datetime.date
-		"""
-		return self.date + self.delta
-
-	def overlaps(self, second):
-		""" @type  second: ModelSlot
+	def overlaps(self, other):
+		""" @type  second: Interval
 		    @rtype         bool
 		"""
-		first = self
-		return first.end() > second.start()
+		return self.interval.end > other.interval.start
 
-	def contains(self, second):
-		""" @type  second: ModelSlot
+	def contains(self, other):
+		""" @type  second: Interval
 		    @rtype         bool
 		"""
-		first = self
-		return first.end() >= second.end()
+		return self.interval.end >= other.interval.end
 
 	def merge(self, other):
 		""" @type other: ModelSlot
@@ -164,8 +94,7 @@ class Timeline(object):
 		""" @type key:   str
 		    @type items: dict | list
 		"""
-		date, delta = Slot.parse_key(key)
-		slot = ModelSlot(date, delta, self.model, items)
+		slot = ModelSlot(interval_type.parse(key), self.model, items)
 		i = bisect_left(self.slots, slot)
 
 		if i < len(self.slots) and self.slots[i] == slot:
@@ -201,15 +130,15 @@ class Timeline(object):
 		self.model.TimelineModel.prepare(self.slots)
 
 	def start(self):
-		""" @rtype datetime.date
+		""" @rtype datetime.datetime
 		"""
-		return self.slots[0].start()
+		return self.slots[0].start
 
-	def merge(self, date, delta):
-		""" @type date:  datetime.date
+	def merge(self, start, delta):
+		""" @type start: datetime.datetime
 		    @type delta: datetime.timedelta
 		"""
-		slot = ModelSlot(date, delta, self.model)
+		slot = ModelSlot(interval_type(start, delta), self.model)
 
 		merged = []
 
@@ -295,7 +224,6 @@ def merge(row, model, pattern, store, dump):
 			if dump:
 				dump_mutation(row, timeline, sys.stdout)
 
-			check_sanity(row, timeline)
 			mutate(row, timeline, store)
 			return True
 
@@ -347,40 +275,3 @@ def dump_mutation(row, timeline, file):
 
 	print >>file
 	file.flush()
-
-def check_sanity(row, timeline):
-
-	# no duplicate updates per month
-
-	updated_months = [slot.key[:6] for slot in timeline.updated]
-	assert len(set(updated_months)) == len(updated_months)
-
-	# no duplicate key removals
-
-	removed_keys = [slot.key for slot in timeline.removed]
-	assert len(set(removed_keys)) == len(removed_keys)
-
-	for slot in timeline.updated:
-
-		# month-only updates
-
-		assert slot.delta.days in xrange(28, 32)
-
-		# update only month old slots
-
-		assert slot.end() <= datetime.date.today() + datetime.timedelta(days=28)
-
-	for slot in timeline.removed:
-
-		# day-only removals
-
-		assert slot.delta.days == 1
-
-		# row must contain removed slots
-
-		assert slot.key in row.slots
-
-		# removed slots must be matched with an updated slot
-
-		year_month = slot.key[:6]
-		assert sum(updated.key.startswith(year_month) for updated in timeline.updated) == 1

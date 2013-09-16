@@ -16,8 +16,11 @@ thrift-api:: gen-py/impress_thrift/Impress.py
 gen-py/impress_thrift/Impress.py: impress.thrift
 	$(THRIFT) --gen py:new_style $^
 
-run-thrift:: thrift-api
-	bin/service-thrift
+run-thrift-daily:: thrift-api
+	bin/service-thrift -f etc/daily.conf
+
+run-thrift-hourly:: thrift-api
+	bin/service-thrift -f etc/hourly.conf
 
 build-thrift:: thrift-api
 	$(PYTHON) setup.py build

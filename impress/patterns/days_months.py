@@ -12,11 +12,11 @@ class TimelinePattern(interface.TimelinePattern):
 	def merge(timeline):
 		""" @type timeline: Timeline
 		"""
-		today = timeline.site.current_date()
+		today = timeline.site.current_datetime().date()
 		month = previous_month(today)
 		begin = previous_month(month)  # skip last month - it might have just ended
 
-		for date in reverse_month_range(begin, timeline.start()):
+		for date in reverse_month_range(begin, timeline.start):
 			delta = month_length(date)
 
 			timeline.merge(date, delta)

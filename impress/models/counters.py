@@ -7,9 +7,9 @@ from .. import model as interface
 
 class CacheModel(interface.AbstractCacheModel):
 
-	def add(self, params, time):
+	def add(self, params, delta):
 		""" @type params: dict
-		    @type time:   datetime.time
+		    @type delta:  datetime.timedelta
 		"""
 		for itemkey, delta in params.iteritems():
 			self.items[itemkey] = self.items.get(itemkey, 0) + delta

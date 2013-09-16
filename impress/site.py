@@ -17,15 +17,17 @@ class Site(object):
 
 	def __init__(self, name):
 		self.name = name
-		config = conf.get("site", name)
-		self.dynamodb_table_name, offsetconfig = config.strip().split()
-		self.offset = datetime.timedelta(hours=int(offsetconfig))
+		config = conf.get("site", name).strip().split()
+
+		if len(config) == 1:
+			self.dynamodb_table_name, = config
+			self.offset = datetime.timedelta()
+		else:
+			self.dynamodb_table_name, offsetconfig = config
+			self.offset = datetime.timedelta(hours=int(offsetconfig))
 
 	def __str__(self):
 		return self.name
 
 	def current_datetime(self):
 		return datetime.datetime.today() + self.offset
-
-	def current_date(self):
-		return self.current_datetime().date()
