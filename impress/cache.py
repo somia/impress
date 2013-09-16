@@ -336,7 +336,7 @@ class History(object):
 					gc.set_debug(0)
 
 					for slot in self.slots:
-						if not slot.store(storage):
+						if not slot.store(self.site, storage):
 							util.safe(self.dump_local_backup, (slot,))
 
 			count = len(self.slots)
