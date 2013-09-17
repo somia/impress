@@ -84,7 +84,10 @@ class Storage(object):
 		item = self.table.new_item(objkey, slotkey)
 
 		for k, v in values.iteritems():
-			item[k] = json.dumps(v)
+			if not isinstance(v, (int, long, float)):
+				v = json.dumps(v)
+
+			item[k] = v
 
 		item.put()
 
