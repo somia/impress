@@ -16,6 +16,9 @@ class NullLogger(object):
 	def store(self, site, error, size, type):
 		pass
 
+	def avail_marker(self, site, error):
+		pass
+
 	def mutate(self, site, error, size, type):
 		pass
 

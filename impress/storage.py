@@ -15,8 +15,11 @@ from .config import conf, log
 from .site import Site
 
 INTERNAL_OBJKEY_PREFIX = "_"
+
 CACHE_BACKUP_OBJKEY    = INTERNAL_OBJKEY_PREFIX + "cache"
 CACHE_BACKUP_SLOTKEY   = "backup"
+
+AVAIL_MARKER_OBJKEY    = INTERNAL_OBJKEY_PREFIX + "avail"
 
 class Storage(object):
 	""" DynamoDB abstraction.
@@ -90,6 +93,23 @@ class Storage(object):
 			item[k] = v
 
 		item.put()
+
+	def insert_avail_marker(self, slotkey, count, errors):
+		""" @type slotkey: str
+		    @type count:   int
+		    @type errors:  int
+		"""
+		evlog_error = eventlog.ERROR_DYNAMODB
+		try:
+			item = self.table.new_item(AVAIL_MARKER_OBJKEY, slotkey)
+			item["count"] = count
+			if errors > 0:
+				item["errors"] = errors
+			item.put()
+
+			evlog_error = 0
+		finally:
+			eventlog.logger.avail_marker(self.site.name, evlog_error)
 
 	def _replace(self, objkey, slots):
 		""" Remove all columns of a single key.  This is a low-level

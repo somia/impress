@@ -92,13 +92,26 @@ class Slot(object):
 				errors += 1
 
 		rate = length / (time.time() - start_time)
+		ok = (errors == 0)
+
+		for i in xrange(10):
+			try:
+				storage.insert_avail_marker(self.key, length - errors, errors)
+				break
+			except:
+				if i < 9:
+					log.debug("avail marker", exc_info=True)
+					time.sleep(1)
+				else:
+					log.exception("failed to store site %s cache %s avail marker", site, self.key)
+					ok = False
 
 		if errors:
 			log.error("failed to store %d/%d keys of site %s cache %s (%f items per second)", errors, length, site, self.key, rate)
 		else:
 			log.info("stored site %s cache %s (%f items per second)", site, self.key, rate)
 
-		return errors == 0
+		return ok
 
 	backup_version = 2
 	supported_backup_versions = 1, 2
