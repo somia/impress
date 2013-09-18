@@ -94,10 +94,11 @@ class Storage(object):
 
 		item.put()
 
-	def insert_avail_marker(self, slotkey, count, errors):
-		""" @type slotkey: str
-		    @type count:   int
-		    @type errors:  int
+	def insert_avail_marker(self, slotkey, count, errors, downtime):
+		""" @type slotkey:  str
+		    @type count:    int
+		    @type errors:   int
+		    @type downtime: datetime.timedelta | NoneType
 		"""
 		evlog_error = eventlog.ERROR_DYNAMODB
 		try:
@@ -105,6 +106,8 @@ class Storage(object):
 			item["count"] = count
 			if errors > 0:
 				item["errors"] = errors
+			if downtime:
+				item["downtime"] = downtime.total_seconds()
 			item.put()
 
 			evlog_error = 0

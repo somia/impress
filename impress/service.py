@@ -16,7 +16,11 @@ class Service(object):
 		return self
 
 	def __exit__(self, *exc):
-		self.cache.flush()
+		# force cache backup for current snapshot time
+		self.flush(force_backup=True)
+
+	def init(self):
+		self.cache.init()
 
 	def add(self, site, objkeys, data):
 		""" @type site:    str

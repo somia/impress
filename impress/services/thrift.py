@@ -52,11 +52,15 @@ def main(args):
 		service_thread.daemon = True
 
 		try:
+			service.init()
+
 			log.debug("starting add queue")
 			addqueue_thread.start()
 
 			log.info("starting thrift service")
 			service_thread.start()
+
+			service.flush()
 
 			# main loop
 

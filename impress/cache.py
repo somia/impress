@@ -25,9 +25,13 @@ class Slot(object):
 	    internal representation is specified per object with a custom model
 	    module.
 	"""
-	def __init__(self, interval, cachedata=None):
+	def __init__(self, interval, downtime=None, cachedata=None, add_downtime=None):
 		self.interval = interval
+		self.downtime = downtime
 		self.cachedata = cachedata or {}
+
+		# wrap callable in a tuple to avoid Python thinking it's a bound method
+		self.__add_downtime = (add_downtime,)
 
 	def __str__(self):
 		return self.key
@@ -35,12 +39,22 @@ class Slot(object):
 	def __nonzero__(self):
 		return bool(self.cachedata)
 
+	def init(self, site, now):
+		""" @type site: Site
+		    @type now:  datetime.datetime
+		"""
+		func, = self.__add_downtime
+		if func:
+			delta = func(site, now)
+			if delta and delta > datetime.timedelta():
+				self.downtime += delta
+
 	@property
 	def key(self):
 		return self.interval.key
 
 	def clone(self):
-		return type(self)(self.interval, copy.deepcopy(self.cachedata))
+		return type(self)(self.interval, self.downtime, copy.deepcopy(self.cachedata))
 
 	def is_active(self, now):
 		""" Compares the interval against the given time.
@@ -96,7 +110,7 @@ class Slot(object):
 
 		for i in xrange(10):
 			try:
-				storage.insert_avail_marker(self.key, length - errors, errors)
+				storage.insert_avail_marker(self.key, length - errors, errors, self.downtime)
 				break
 			except:
 				if i < 9:
@@ -106,15 +120,20 @@ class Slot(object):
 					log.exception("failed to store site %s cache %s avail marker", site, self.key)
 					ok = False
 
-		if errors:
-			log.error("failed to store %d/%d keys of site %s cache %s (%f items per second)", errors, length, site, self.key, rate)
+		if self.downtime is None:
+			downstr = "without downtime"
 		else:
-			log.info("stored site %s cache %s (%f items per second)", site, self.key, rate)
+			downstr = "with %s downtime" % self.downtime
+
+		if errors:
+			log.error("failed to store %d/%d keys of site %s cache %s %s (%f items per second)", errors, length, site, self.key, downstr, rate)
+		else:
+			log.info("stored site %s cache %s %s (%f items per second)", site, self.key, downstr, rate)
 
 		return ok
 
-	backup_version = 2
-	supported_backup_versions = 1, 2
+	backup_version = 3
+	supported_backup_versions = 1, 2, 3
 
 	@classmethod
 	def load_backup(cls, backup):
@@ -126,22 +145,35 @@ class Slot(object):
 
 		if "interval_start" not in values:
 			date = values["date"]
-			interval_start = datetime.datetime(date.year, date.month, date.day)
+			interval = interval_type(datetime.datetime(date.year, date.month, date.day))
 		else:
-			interval_start = values["interval_start"]
+			interval = interval_type(values["interval_start"])
 
 		cachedata = values["cachedata"]
 
 		for modeldata in cachedata.itervalues():
 			modeldata.upgrade()
 
-		return cls(interval_type(interval_start), cachedata)
+		downtime = values.get("downtime", datetime.timedelta())
+		snapshot_end = values.get("snapshot_end")
 
-	def make_backup(self):
+		if snapshot_end is not None:
+			def add_downtime(site, now):
+				delta = min(now, interval.end - site.offset) - snapshot_end
+				log.info("site %s cache backup has staled for %s", site, delta)
+				return delta
+		else:
+			add_downtime = None
+
+		return cls(interval, downtime, cachedata, add_downtime)
+
+	def make_backup(self, snapshot_end):
 		values = {
 			"version": self.backup_version,
 			"interval_start": self.interval.start,
 			"cachedata": self.cachedata,
+			"downtime": self.downtime or datetime.timedelta(),
+			"snapshot_end": snapshot_end,
 		}
 
 		return NewBackup(values)
@@ -155,6 +187,13 @@ class Active(object):
 		self.lock = lock_type()
 		self.slot = self.load_backup(storage)
 		self.modified = False
+
+	def init(self, now):
+		""" @type now: datetime.datetime
+		"""
+		self.slot.init(self.site, now)
+
+		log.info("site %s cache %s initialized with %s downtime", self.site, self.slot, self.slot.downtime)
 
 	def add(self, objkeys, params, model):
 		""" Accumulate objects' data.  Return the previous slot if the interval
@@ -238,7 +277,7 @@ class Active(object):
 					choice = None
 
 			if not choice:
-				return Slot(interval_type(self.site.current_datetime()))
+				return self.__load_empty()
 
 			slot = Slot.load_backup(choice)
 
@@ -246,11 +285,24 @@ class Active(object):
 
 		return slot
 
-	def dump_backup(self, storage):
-		with self.lock:
-			if not self.modified:
-				log.debug("site %s cache not modified since last dump", self.site)
-				return
+	def __load_empty(self):
+		inteval = interval_type(self.site.current_datetime())
+
+		def add_downtime(site, now):
+			site_now = now + site.offset
+			if site_now < interval.end:
+				return site_now - interval.start
+			else:
+				return interval.delta
+
+		return Slot(interval, datetime.timedelta(), {}, add_downtime)
+
+	def dump_backup(self, storage, force):
+		if not force:
+			with self.lock:
+				if not self.modified:
+					log.debug("site %s cache not modified since last dump", self.site)
+					return
 
 		log.debug("dumping site %s cache backup", self.site)
 
@@ -261,11 +313,13 @@ class Active(object):
 				storage.reset()
 
 				with self.lock:
+					snapshot_end = datetime.datetime.today()
+
 					with util.Fork() as child:
 						if child:
 							gc.disable()
 
-							backup = self.slot.make_backup()
+							backup = self.slot.make_backup(snapshot_end)
 							try:
 								storage.insert_cache_backup(backup)
 								result = 0
@@ -359,7 +413,7 @@ class History(object):
 			del self.slots[:count]
 
 	def dump_local_backup(self, slot):
-		backup = slot.make_backup()
+		backup = slot.make_backup(slot.interval.end)
 
 		filename = self.local_backup_format.format(site=self.site, slot=slot)
 		partname = filename + ".partial"
@@ -390,6 +444,11 @@ class SiteCache(object):
 
 		self.active = Active(lock_type, site, self.storage)
 		self.history = History(lock_type, site)
+
+	def init(self, now):
+		""" @type now: datetime.datetime
+		"""
+		self.active.init(now)
 
 	def add(self, objkeys, data, model):
 		""" Accumulate objects's data in active cache.  The active
@@ -432,7 +491,7 @@ class SiteCache(object):
 
 		return "{" + ",".join(json_slots) + "}"
 
-	def flush(self, force_rotate=False):
+	def flush(self, force_rotate=False, force_backup=False):
 		""" Rotates active cache (if necessary), stores cache history
 		    and backups active cache.
 		"""
@@ -441,13 +500,19 @@ class SiteCache(object):
 			self.history.append(rotated_slot)
 
 		util.safe(self.history.store, (self.storage,), error="history storing failed")
-		util.safe(self.active.dump_backup, (self.storage,), error="backup dumping failed")
+		util.safe(self.active.dump_backup, (self.storage, force_backup), error="backup dumping failed")
 
 class Cache(object):
 	""" Groups all known SiteCaches.
 	"""
 	def __init__(self, lock_type):
 		self.sitecaches = { name: SiteCache(lock_type, name) for name in conf.options("site") }
+
+	def init(self):
+		now = datetime.datetime.today()
+
+		for sitecache in self.sitecaches.itervalues():
+			sitecache.init(now)
 
 	def add(self, sitename, objkeys, data, model):
 		""" @type sitename: str
@@ -464,9 +529,9 @@ class Cache(object):
 		"""
 		return self.sitecaches[sitename].get(objkeys)
 
-	def flush(self, force_rotate=False):
+	def flush(self, *args, **kwargs):
 		for sitecache in self.sitecaches.itervalues():
-			sitecache.flush(force_rotate)
+			sitecache.flush(*args, **kwargs)
 
 def check_dirname(path):
 	""" Creates all directories in a filename path if they don't exist.

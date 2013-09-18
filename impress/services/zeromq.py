@@ -33,13 +33,15 @@ def main(args):
 				socket.bind(conf.get("zeromq", "bind"))
 				socket.setsockopt(zmq.SUBSCRIBE, b"")
 
+				service.init()
+
 				poller = zmq.Poller()
 				poller.register(socket, zmq.POLLIN)
 				poller.register(signal_fd, zmq.POLLIN)
 
 				try:
 					flush_interval = conf.getint("backup", "interval")
-					flush_time = time.time()
+					flush_time = 0
 
 					while True:
 						timeout = flush_time + flush_interval - time.time()
