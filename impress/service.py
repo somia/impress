@@ -1,8 +1,9 @@
 from __future__ import absolute_import
 
 from . import eventlog
+from . import util
 from .cache import Cache
-from .config import argument_parser, configure, log
+from .config import argument_parser, configure, log, reconfigure
 from .registry import Registry
 
 class Service(object):
@@ -61,6 +62,13 @@ class Service(object):
 			eventlog.logger.get(site, evlog_error, evlog_size, evlog_count)
 
 		return data
+
+	def reconfigure(self):
+		util.safe(reconfigure, error="reconfiguration failed")
+		util.safe(self.registry.reconfigure, error="registry reconfiguration failed")
+
+	def flush(self, *args, **kwargs):
+		self.cache.flush(*args, **kwargs)
 
 class Main(object):
 

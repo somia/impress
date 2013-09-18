@@ -26,7 +26,7 @@ import impress_thrift.ImpressCache as thriftapi
 
 from .. import eventlog
 from .. import util
-from ..config import reconfigure, conf, log
+from ..config import conf, log
 from ..service import Main
 
 def main(args):
@@ -64,19 +64,18 @@ def main(args):
 				condition = control.sleep()
 
 				if condition == control.Condition.Timeout:
-					service.cache.flush()
+					service.flush()
 
 				elif condition == control.Condition.Terminate:
 					break
 
 				elif condition == control.Condition.Hangup:
 					log.info("reconfiguring")
-					util.safe(reconfigure, error="reconfiguration failed")
-					util.safe(registry.reconfigure, error="registry reconfiguration failed")
+					service.reconfigure()
 
 				elif condition == control.Condition.User1:
 					if conf.getboolean("debug", "force_cache_rotation", False):
-						service.cache.flush(force_rotate=True)
+						service.flush(force_rotate=True)
 		finally:
 			log.info("closing add queue")
 			addqueue.close()
